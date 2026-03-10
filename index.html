@@ -1665,52 +1665,56 @@ function saveColumns() {
   localStorage.setItem('vb_columns', JSON.stringify(state.columns));
 }
 
+let currentVersion = 0;
+
+async function applyData(data) {
+  people.length = 0;
+  people.push(...data.people);
+
+  const savedCols = localStorage.getItem('vb_columns');
+  if (savedCols) {
+    const parsed = JSON.parse(savedCols);
+    const validIds = new Set(people.map(p => p.id));
+    parsed.forEach(col => { col.peopleIds = col.peopleIds.filter(id => validIds.has(id)); });
+    const assignedIds = new Set(parsed.flatMap(c => c.peopleIds));
+    const unassigned = people.filter(p => !assignedIds.has(p.id)).map(p => p.id);
+    if (unassigned.length && parsed.length > 0) parsed[0].peopleIds.push(...unassigned);
+    state.columns = parsed;
+  } else {
+    const ids = people.map(p => p.id);
+    const cols = [
+      { id: 'col1', title: '', peopleIds: [] },
+      { id: 'col2', title: '', peopleIds: [] },
+      { id: 'col3', title: '', peopleIds: [] },
+      { id: 'col4', title: '', peopleIds: [] },
+    ];
+    ids.forEach((id, i) => cols[i % 4].peopleIds.push(id));
+    state.columns = cols;
+  }
+
+  Object.keys(comments).forEach(k => delete comments[k]);
+  if (data.comments) Object.assign(comments, data.comments);
+
+  data.people.forEach(p => p.tasks.forEach(t => {
+    taskStatus[t.id] = t.initialStatus;
+  }));
+  saveStatus();
+
+  rebuildTaskMap();
+  renderBoard();
+  currentVersion = data.version || 0;
+}
+
 async function loadNotionData() {
   document.getElementById('board').innerHTML =
-    '<div style="padding:40px 32px;color:var(--text-secondary);font-size:14px">Loading from Notion...</div>';
+    '<div style="padding:40px 32px;color:var(--text-secondary);font-size:14px">Loading...</div>';
   try {
     const res = await fetch('/api/tasks');
     if (!res.ok) throw new Error(`Server error: ${res.status}`);
     const data = await res.json();
     if (data.error) throw new Error(data.error);
 
-    people.length = 0;
-    people.push(...data.people);
-
-    // Restore saved column layout, or default to one column with everyone
-    const savedCols = localStorage.getItem('vb_columns');
-    if (savedCols) {
-      const parsed = JSON.parse(savedCols);
-      const validIds = new Set(people.map(p => p.id));
-      parsed.forEach(col => { col.peopleIds = col.peopleIds.filter(id => validIds.has(id)); });
-      const assignedIds = new Set(parsed.flatMap(c => c.peopleIds));
-      const unassigned = people.filter(p => !assignedIds.has(p.id)).map(p => p.id);
-      if (unassigned.length && parsed.length > 0) parsed[0].peopleIds.push(...unassigned);
-      state.columns = parsed;
-    } else {
-      const ids = people.map(p => p.id);
-      const cols = [
-        { id: 'col1', title: '', peopleIds: [] },
-        { id: 'col2', title: '', peopleIds: [] },
-        { id: 'col3', title: '', peopleIds: [] },
-        { id: 'col4', title: '', peopleIds: [] },
-      ];
-      ids.forEach((id, i) => cols[i % 4].peopleIds.push(id));
-      state.columns = cols;
-    }
-
-    // Load Notion comments (clear local-only ones from previous fetch)
-    Object.keys(comments).forEach(k => delete comments[k]);
-    if (data.comments) Object.assign(comments, data.comments);
-
-    // Always sync status from Notion on load
-    data.people.forEach(p => p.tasks.forEach(t => {
-      taskStatus[t.id] = t.initialStatus;
-    }));
-    saveStatus();
-
-    rebuildTaskMap();
-    renderBoard();
+    await applyData(data);
   } catch (err) {
     document.getElementById('board').innerHTML =
       `<div style="padding:40px 32px;color:#f87171;font-size:14px">Failed to load from Notion: ${err.message}</div>`;
@@ -1719,6 +1723,19 @@ async function loadNotionData() {
 
 initBoardClicks();
 loadNotionData();
+
+// Poll for changes every 30 seconds — only re-render if data actually changed
+setInterval(async () => {
+  try {
+    const res = await fetch('/api/version');
+    const { version } = await res.json();
+    if (version && version !== currentVersion) {
+      const dataRes = await fetch('/api/tasks');
+      const data = await dataRes.json();
+      if (!data.error) await applyData(data);
+    }
+  } catch { /* ignore poll errors */ }
+}, 30 * 1000);
 
 document.getElementById('viewToggle').addEventListener('click', e => {
   const btn = e.target.closest('[data-view]');

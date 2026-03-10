@@ -126,92 +126,123 @@ function mapInitialStatus(statusName) {
   return 'planned';
 }
 
-const app = express();
+// ---- CACHE ----
 
-app.get('/api/tasks', async (req, res) => {
-  try {
-    const pages = await fetchAllPages();
-    const peopleMap = new Map();
-    let colorIdx = 0;
+let dataCache = null;
+let cacheVersion = 0;
+let cacheRefreshing = false;
 
-    for (const page of pages) {
-      const props = page.properties;
+async function buildTaskData() {
+  const pages = await fetchAllPages();
+  const peopleMap = new Map();
+  let colorIdx = 0;
 
-      // Title
-      const titleArr = (props.Task || {}).title || [];
-      const title = titleArr.map(t => t.plain_text).join('').trim();
+  for (const page of pages) {
+    const props = page.properties;
 
-      // Status
-      const statusSel = (props.Status || {}).select || null;
-      const statusName = statusSel ? statusSel.name : null;
+    const titleArr = (props.Task || {}).title || [];
+    const title = titleArr.map(t => t.plain_text).join('').trim();
 
-      // Department
-      const deptSel = (props.Department || {}).select || null;
-      const deptName = deptSel ? deptSel.name : null;
+    const statusSel = (props.Status || {}).select || null;
+    const statusName = statusSel ? statusSel.name : null;
 
-      // Skip if any required field is missing
-      if (!title || !statusName || !deptName) continue;
+    const deptSel = (props.Department || {}).select || null;
+    const deptName = deptSel ? deptSel.name : null;
 
-      const deptKey = DEPT_MAP[deptName] || deptName.toLowerCase().replace(/\s+/g, '');
+    if (!title || !statusName || !deptName) continue;
 
-      // Date
-      const dateObj = (props['Week date'] || {}).date || null;
-      const dateStr = dateObj ? dateObj.start : null;
+    const deptKey = DEPT_MAP[deptName] || deptName.toLowerCase().replace(/\s+/g, '');
 
-      // Filter out Done unless it falls within this Sun-Sat week
-      if (statusName === 'Done' && !isThisWeek(dateStr)) continue;
+    const dateObj = (props['Week date'] || {}).date || null;
+    const dateStr = dateObj ? dateObj.start : null;
 
-      const flagged = statusName.toLowerCase().includes('needs help');
+    if (statusName === 'Done' && !isThisWeek(dateStr)) continue;
 
-      // Notes from Commit description
-      const notesArr = (props['Commit description'] || {}).rich_text || [];
-      const notes = notesArr.map(t => t.plain_text).join('').trim();
+    const flagged = statusName.toLowerCase().includes('needs help');
 
-      // Due display
-      const due = dateStr
-        ? parseLocalDate(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-        : '';
+    const notesArr = (props['Commit description'] || {}).rich_text || [];
+    const notes = notesArr.map(t => t.plain_text).join('').trim();
 
-      const initialStatus = mapInitialStatus(statusName);
+    const due = dateStr
+      ? parseLocalDate(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+      : '';
 
-      // Person is now a select field (migrated from people type)
-      const personSel = (props.Person || {}).select || null;
-      const name = personSel ? personSel.name : null;
-      if (!name) continue;
+    const initialStatus = mapInitialStatus(statusName);
 
-      if (!peopleMap.has(name)) {
-        peopleMap.set(name, {
-          id: name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, ''),
-          name,
-          role: deptName,
-          avatarColor: AVATAR_COLORS[colorIdx++ % AVATAR_COLORS.length],
-          tasks: [],
-        });
-      }
+    const personSel = (props.Person || {}).select || null;
+    const name = personSel ? personSel.name : null;
+    if (!name) continue;
 
-      peopleMap.get(name).tasks.push({
-        id: page.id,
-        name: title,
-        dept: deptKey,
-        flagged,
-        notes,
-        status: statusName,
-        due,
-        initialStatus,
+    if (!peopleMap.has(name)) {
+      peopleMap.set(name, {
+        id: name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, ''),
+        name,
+        role: deptName,
+        avatarColor: AVATAR_COLORS[colorIdx++ % AVATAR_COLORS.length],
+        tasks: [],
       });
     }
 
-    // Fetch comments for all included pages in parallel
-    const includedIds = [...new Set(
-      Array.from(peopleMap.values()).flatMap(p => p.tasks.map(t => t.id))
-    )];
-    const commentResults = await Promise.all(includedIds.map(id => fetchPageComments(id)));
-    const comments = {};
-    includedIds.forEach((id, i) => { if (commentResults[i].length) comments[id] = commentResults[i]; });
+    peopleMap.get(name).tasks.push({
+      id: page.id,
+      name: title,
+      dept: deptKey,
+      flagged,
+      notes,
+      status: statusName,
+      due,
+      initialStatus,
+    });
+  }
 
-    res.json({ people: Array.from(peopleMap.values()), comments });
+  const includedIds = [...new Set(
+    Array.from(peopleMap.values()).flatMap(p => p.tasks.map(t => t.id))
+  )];
+  const commentResults = await Promise.all(includedIds.map(id => fetchPageComments(id)));
+  const comments = {};
+  includedIds.forEach((id, i) => { if (commentResults[i].length) comments[id] = commentResults[i]; });
+
+  return { people: Array.from(peopleMap.values()), comments };
+}
+
+async function refreshCache() {
+  if (cacheRefreshing) return;
+  cacheRefreshing = true;
+  try {
+    const data = await buildTaskData();
+    dataCache = data;
+    cacheVersion = Date.now();
+    console.log(`[cache] refreshed at ${new Date().toISOString()}`);
   } catch (err) {
-    console.error('Notion fetch error:', err.message);
+    console.error('[cache] refresh failed:', err.message);
+  } finally {
+    cacheRefreshing = false;
+  }
+}
+
+// Warm cache on startup, then refresh every 60 seconds
+refreshCache();
+setInterval(refreshCache, 60 * 1000);
+
+// ---- ROUTES ----
+
+const app = express();
+
+app.get('/api/version', (req, res) => {
+  res.json({ version: cacheVersion });
+});
+
+app.get('/api/tasks', async (req, res) => {
+  try {
+    if (!dataCache) {
+      // First boot — wait for cache to be ready
+      await new Promise(resolve => {
+        const check = setInterval(() => { if (dataCache) { clearInterval(check); resolve(); } }, 100);
+      });
+    }
+    res.json({ ...dataCache, version: cacheVersion });
+  } catch (err) {
+    console.error('Error serving tasks:', err.message);
     res.status(500).json({ error: err.message });
   }
 });

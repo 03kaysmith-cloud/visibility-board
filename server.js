@@ -5,7 +5,8 @@ const path = require('path');
 
 const NOTION_KEY = process.env.NOTION_KEY || 'ntn_o72845711711ULdEW2UsgsYj8DGvEumAimeXyivdNEYe7X';
 const DATABASE_ID = process.env.DATABASE_ID || '31c1b231bc238079a79decead097d0aa';
-const SLACK_TOKEN = process.env.SLACK_TOKEN || '';
+const SLACK_TOKEN    = process.env.SLACK_TOKEN    || '';
+const ANTHROPIC_KEY  = process.env.ANTHROPIC_API_KEY || '';
 
 const AVATAR_COLORS = [
   '#6366f1','#ec4899','#14b8a6','#f59e0b','#3b82f6','#10b981','#8b5cf6','#ef4444',
@@ -77,35 +78,95 @@ function slackGet(path) {
   });
 }
 
-async function buildSlackAvatarMap() {
-  if (!SLACK_TOKEN) return {};
-  try {
-    const data = await slackGet('/api/users.list?limit=200');
-    if (!data.ok) { console.warn('[slack] users.list error:', data.error); return {}; }
-    const byFullName = {};
-    const byFirstName = {};
-    for (const m of (data.members || [])) {
-      if (m.deleted || m.is_bot || m.is_app_user) continue;
-      const avatarUrl = m.profile && (m.profile.image_192 || m.profile.image_72);
-      if (!avatarUrl) continue;
-      const full = (m.real_name || '').trim().toLowerCase();
-      if (full) byFullName[full] = avatarUrl;
-      const first = full.split(' ')[0];
-      if (first && !byFirstName[first]) byFirstName[first] = avatarUrl;
-    }
-    return { byFullName, byFirstName };
-  } catch (err) {
-    console.warn('[slack] avatar fetch failed:', err.message);
-    return {};
-  }
+function anthropicPost(body) {
+  return new Promise((resolve, reject) => {
+    const payload = JSON.stringify(body);
+    const req = https.request({
+      hostname: 'api.anthropic.com',
+      path: '/v1/messages',
+      method: 'POST',
+      headers: {
+        'x-api-key': ANTHROPIC_KEY,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+        'content-length': Buffer.byteLength(payload),
+      },
+    }, res => {
+      let data = '';
+      res.on('data', c => { data += c; });
+      res.on('end', () => {
+        try { resolve(JSON.parse(data)); } catch (e) { reject(e); }
+      });
+    });
+    req.on('error', reject);
+    req.write(payload);
+    req.end();
+  });
 }
 
-function resolveSlackAvatar(name, avatarMap) {
-  if (!avatarMap || !avatarMap.byFullName) return null;
-  const lower = name.toLowerCase();
-  if (avatarMap.byFullName[lower]) return avatarMap.byFullName[lower];
-  const first = lower.split(' ')[0];
-  return avatarMap.byFirstName[first] || null;
+// Cache: notionName (lowercase) -> avatarUrl
+let slackAvatarCache = null;
+
+async function refreshSlackAvatarCache(notionNames) {
+  if (!SLACK_TOKEN) { slackAvatarCache = {}; return; }
+  try {
+    const data = await slackGet('/api/users.list?limit=200');
+    if (!data.ok) { console.warn('[slack] users.list error:', data.error); slackAvatarCache = {}; return; }
+
+    const slackUsers = (data.members || [])
+      .filter(m => !m.deleted && !m.is_bot && !m.is_app_user)
+      .map(m => ({
+        real_name:    (m.real_name || '').trim(),
+        display_name: (m.profile && m.profile.display_name || '').trim(),
+        username:     (m.name || '').trim(),
+        avatarUrl:    m.profile && (m.profile.image_192 || m.profile.image_72),
+      }))
+      .filter(u => u.avatarUrl && u.real_name);
+
+    const avatarByName = {};
+    for (const u of slackUsers) avatarByName[u.real_name.toLowerCase()] = u.avatarUrl;
+
+    if (ANTHROPIC_KEY) {
+      const slackList = slackUsers
+        .map(u => `- "${u.real_name}" (display: "${u.display_name}", username: "${u.username}")`)
+        .join('\n');
+      const notionList = notionNames.map(n => `- ${n}`).join('\n');
+      const prompt = `Match these Notion names to Slack users. Only match if you're confident they're the same person — consider nicknames, shortened names, or first-name-only Slack profiles.\n\nSlack users:\n${slackList}\n\nNotion names:\n${notionList}\n\nReturn ONLY a JSON object: {"Notion Name": "Slack real_name"}. Include only confident matches, omit the rest.`;
+
+      const response = await anthropicPost({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 512,
+        messages: [{ role: 'user', content: prompt }],
+      });
+      const text = (response.content && response.content[0] && response.content[0].text) || '{}';
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      const mapping = jsonMatch ? JSON.parse(jsonMatch[0]) : {};
+
+      const result = {};
+      for (const [notionName, slackName] of Object.entries(mapping)) {
+        const url = avatarByName[slackName.toLowerCase()];
+        if (url) result[notionName.toLowerCase()] = url;
+      }
+      console.log(`[slack] AI matched ${Object.keys(result).length}/${notionNames.length} names`);
+      slackAvatarCache = result;
+    } else {
+      // Fallback: exact + first-name matching
+      const byFirst = {};
+      for (const u of slackUsers) {
+        const first = u.real_name.toLowerCase().split(' ')[0];
+        if (first && !byFirst[first]) byFirst[first] = u.avatarUrl;
+      }
+      const result = {};
+      for (const name of notionNames) {
+        const lower = name.toLowerCase();
+        result[lower] = avatarByName[lower] || byFirst[lower.split(' ')[0]] || null;
+      }
+      slackAvatarCache = result;
+    }
+  } catch (err) {
+    console.warn('[slack] avatar refresh failed:', err.message);
+    slackAvatarCache = {};
+  }
 }
 
 function authorColor(name) {
@@ -248,9 +309,10 @@ async function buildTaskData() {
     });
   }
 
-  const slackAvatarMap = await buildSlackAvatarMap();
+  const notionNames = [...peopleMap.keys()];
+  if (!slackAvatarCache) await refreshSlackAvatarCache(notionNames);
   for (const person of peopleMap.values()) {
-    person.avatarUrl = resolveSlackAvatar(person.name, slackAvatarMap);
+    person.avatarUrl = slackAvatarCache[person.name.toLowerCase()] || null;
   }
 
   const includedIds = [...new Set(
@@ -314,6 +376,8 @@ async function pollForChanges() {
 // Warm cache on startup, then check for changes every 60 seconds
 refreshCache();
 setInterval(pollForChanges, 10 * 1000);
+// Refresh Slack avatar cache hourly so new team members get picked up
+setInterval(() => { slackAvatarCache = null; }, 60 * 60 * 1000);
 
 // ---- ROUTES ----
 

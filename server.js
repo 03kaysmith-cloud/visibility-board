@@ -206,6 +206,21 @@ async function buildTaskData() {
   return { people: Array.from(peopleMap.values()), comments };
 }
 
+let lastChecked = new Date(0).toISOString();
+
+async function hasNotionChangedSince(since) {
+  // Strip milliseconds — Notion filter is finicky with .000Z format
+  const timestamp = since.replace(/\.\d{3}Z$/, 'Z');
+  const data = await notionPost(`/v1/databases/${DATABASE_ID}/query`, {
+    page_size: 1,
+    filter: {
+      timestamp: 'last_edited_time',
+      last_edited_time: { after: timestamp },
+    },
+  });
+  return data.results && data.results.length > 0;
+}
+
 async function refreshCache() {
   if (cacheRefreshing) return;
   cacheRefreshing = true;
@@ -213,6 +228,7 @@ async function refreshCache() {
     const data = await buildTaskData();
     dataCache = data;
     cacheVersion = Date.now();
+    lastChecked = new Date().toISOString();
     console.log(`[cache] refreshed at ${new Date().toISOString()}`);
   } catch (err) {
     console.error('[cache] refresh failed:', err.message);
@@ -221,9 +237,26 @@ async function refreshCache() {
   }
 }
 
-// Warm cache on startup, then refresh every 60 seconds
+async function pollForChanges() {
+  // Record time before the check so no changes fall through the gap
+  const checkTime = new Date().toISOString();
+  try {
+    const changed = await hasNotionChangedSince(lastChecked);
+    if (changed) {
+      console.log('[cache] change detected — refreshing');
+      await refreshCache(); // also updates lastChecked
+    } else {
+      lastChecked = checkTime;
+    }
+  } catch (err) {
+    console.error('[cache] poll error:', err.message);
+    // Don't advance lastChecked — retry next interval
+  }
+}
+
+// Warm cache on startup, then check for changes every 60 seconds
 refreshCache();
-setInterval(refreshCache, 60 * 1000);
+setInterval(pollForChanges, 60 * 1000);
 
 // ---- ROUTES ----
 

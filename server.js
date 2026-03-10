@@ -289,6 +289,9 @@ async function buildTaskData() {
     const notesArr = (props['Commit description'] || {}).rich_text || [];
     const notes = notesArr.map(t => t.plain_text).join('').trim();
 
+    const outcomesArr = (props['Outcomes'] || {}).rich_text || [];
+    const outcomes = outcomesArr.map(t => t.plain_text).join('').trim();
+
     const due = dateStr
       ? parseLocalDate(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
       : '';
@@ -315,6 +318,7 @@ async function buildTaskData() {
       dept: deptKey,
       flagged,
       notes,
+      outcomes,
       status: statusName,
       due,
       initialStatus,
@@ -424,7 +428,7 @@ function notionStatusName(weeklyStatus, flagged) {
 }
 
 app.patch('/api/tasks/:id', express.json(), async (req, res) => {
-  const { name, dept, flagged, notes, weeklyStatus } = req.body;
+  const { name, dept, flagged, notes, outcomes, weeklyStatus } = req.body;
   const properties = {};
 
   if (name !== undefined)
@@ -438,6 +442,9 @@ app.patch('/api/tasks/:id', express.json(), async (req, res) => {
 
   if (notes !== undefined)
     properties['Commit description'] = { rich_text: notes ? [{ text: { content: notes } }] : [] };
+
+  if (outcomes !== undefined)
+    properties['Outcomes'] = { rich_text: outcomes ? [{ text: { content: outcomes } }] : [] };
 
   try {
     await notionRequest('PATCH', `/v1/pages/${req.params.id}`, { properties });

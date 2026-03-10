@@ -462,8 +462,8 @@
     /* clickable status cycle tag — subtle, sits below task name */
     .task-status-tag {
       display: inline-block;
-      width: 10px;
-      height: 10px;
+      width: 16px;
+      height: 16px;
       border-radius: 50%;
       cursor: pointer;
       user-select: none;
@@ -682,18 +682,50 @@
 
     .dept-tag-btn:hover { opacity: 0.75; }
 
+    .panel-field-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 6px;
+    }
+
+    .panel-field-edit-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: var(--text-muted);
+      padding: 2px 4px;
+      border-radius: 4px;
+      line-height: 1;
+      display: flex;
+      align-items: center;
+    }
+
+    .panel-field-edit-btn:hover { color: var(--text-secondary); }
+
+    .panel-field-display {
+      font-size: 13px;
+      color: var(--text-secondary);
+      line-height: 1.6;
+      min-height: 36px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .panel-field-display.empty { color: var(--text-muted); }
+
     .panel-notes-input {
       width: 100%;
       background: var(--surface-2);
       border: 1px solid var(--border);
       border-radius: var(--radius-sm);
-      padding: 10px 12px;
+      padding: 8px 10px;
       font-size: 13px;
       color: var(--text-secondary);
       font-family: inherit;
       resize: none;
       line-height: 1.6;
-      min-height: 80px;
+      min-height: 60px;
       transition: border-color 0.15s;
     }
 
@@ -1215,7 +1247,7 @@
       <div class="panel-person-line" id="panelPersonLine"></div>
     </div>
     <div class="panel-header-right">
-      <span class="task-status-tag" id="panelStatusDot" style="cursor:default;opacity:0.8"></span>
+      <span id="panelStatusDot" style="cursor:pointer;opacity:0.8;flex-shrink:0"></span>
       <button class="panel-close" id="panelClose">&#x2715;</button>
     </div>
   </div>
@@ -1259,6 +1291,25 @@ const comments = {};
 // task status: 'planned' | 'doing' | 'done'
 const STATUS_CYCLE = ['planned', 'doing', 'done'];
 let taskStatus = JSON.parse(localStorage.getItem('vb_taskStatus') || '{}');
+
+// Dirty tracking: prevents background Notion polls from overwriting local
+// changes before Notion has had time to reflect them. Any task modified
+// locally is shielded for 60 seconds — after that Notion data wins.
+const dirtyTasks = new Map(); // taskId -> { ts, weeklyStatus, flagged }
+
+function markDirty(taskId) {
+  const entry = taskMap[taskId];
+  dirtyTasks.set(taskId, {
+    ts: Date.now(),
+    weeklyStatus: taskStatus[taskId],
+    flagged: entry ? entry.task.flagged : undefined,
+  });
+}
+
+setInterval(() => {
+  const cutoff = Date.now() - 60000;
+  dirtyTasks.forEach((v, id) => { if (v.ts < cutoff) dirtyTasks.delete(id); });
+}, 30000);
 
 // Weekly reset: clear 'done' tasks every Sunday night
 (function weeklyReset() {
@@ -1324,7 +1375,8 @@ function sortTasks(tasks) {
 }
 
 function deptTag(dept) {
-  const d = DEPT[dept] || { label: dept || '?', cls: '' };
+  if (!dept) return '';
+  const d = DEPT[dept] || { label: dept, cls: '' };
   return `<span class="dept-tag ${d.cls}">${d.label}</span>`;
 }
 
@@ -1566,6 +1618,7 @@ function initBoardClicks() {
       const next = STATUS_CYCLE[(STATUS_CYCLE.indexOf(current) + 1) % STATUS_CYCLE.length];
       taskStatus[id] = next;
       saveStatus();
+      markDirty(id);
       renderBoard();
       syncTask(id, { weeklyStatus: next, flagged: taskMap[id] ? taskMap[id].task.flagged : false });
       return;
@@ -1631,7 +1684,7 @@ function openPanel(taskId) {
   panel.offsetHeight; // force reflow so CSS transition plays
 
   const { task, person } = taskMap[taskId];
-  const d = DEPT[task.dept] || { label: task.dept || '?', cls: '' };
+  const d = DEPT[task.dept] || { label: task.dept || '', cls: '' };
   const weeklyStatus = taskStatus[taskId] || 'planned';
 
   // Header
@@ -1647,12 +1700,42 @@ function openPanel(taskId) {
     headerTagsEl.className = 'panel-header-tags';
     document.getElementById('panelDeptTag').replaceWith(headerTagsEl);
   }
-  headerTagsEl.innerHTML = `
-    <span class="dept-tag ${d.cls} dept-tag-btn" id="panelDeptToggle" title="Click to change dept">${d.label}</span>`;
+  headerTagsEl.innerHTML = d.label
+    ? `<span class="dept-tag ${d.cls} dept-tag-btn" id="panelDeptToggle" title="Click to change dept">${d.label}</span>`
+    : `<span class="dept-tag-btn" id="panelDeptToggle" title="Click to set dept" style="color:var(--text-muted);font-size:11px;cursor:pointer">+ dept</span>`;
 
   const barStatus = task.flagged ? 'flagged' : weeklyStatus;
   document.getElementById('panelStatusBar').className = `panel-status-bar ${barStatus}`;
-  document.getElementById('panelStatusDot').className = `task-status-tag ${weeklyStatus}`;
+
+  const dotEl = document.getElementById('panelStatusDot');
+  if (task.flagged) {
+    dotEl.className = '';
+    dotEl.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:rgba(248,113,113,0.2);color:#f87171;font-size:10px;font-weight:800;flex-shrink:0;line-height:1;cursor:pointer;opacity:0.8';
+    dotEl.textContent = '!';
+    dotEl.title = 'Needs help — click to cycle status';
+  } else {
+    dotEl.className = `task-status-tag ${weeklyStatus}`;
+    dotEl.style.cssText = 'cursor:pointer;opacity:0.8;flex-shrink:0';
+    dotEl.textContent = '';
+    dotEl.title = `${weeklyStatus} — click to cycle status`;
+  }
+
+  const PANEL_CYCLE = ['planned', 'doing', 'done', 'flagged'];
+  dotEl.onclick = () => {
+    const currentState = task.flagged ? 'flagged' : (taskStatus[taskId] || 'planned');
+    const nextState = PANEL_CYCLE[(PANEL_CYCLE.indexOf(currentState) + 1) % PANEL_CYCLE.length];
+    if (nextState === 'flagged') {
+      task.flagged = true;
+    } else {
+      task.flagged = false;
+      taskStatus[taskId] = nextState;
+      saveStatus();
+    }
+    markDirty(taskId);
+    renderBoard();
+    openPanel(taskId);
+    syncTask(taskId, { weeklyStatus: taskStatus[taskId] || task.initialStatus, flagged: task.flagged });
+  };
 
   // Editable task name
   const nameEl = document.getElementById('panelTaskName');
@@ -1692,6 +1775,7 @@ function openPanel(taskId) {
 
   document.getElementById('panelFlagToggle').addEventListener('click', () => {
     task.flagged = !task.flagged;
+    markDirty(taskId);
     openPanel(taskId);
     renderBoard();
     syncTask(taskId, { flagged: task.flagged, weeklyStatus: taskStatus[taskId] || task.initialStatus });
@@ -1706,20 +1790,78 @@ function openPanel(taskId) {
     fetch(`/api/tasks/${taskId}`, { method: 'DELETE' }).catch(err => console.warn('[sync] delete failed:', err));
   });
 
-  // Notes
-  const notesSection = document.createElement('div');
-  notesSection.innerHTML = `<div class="panel-section-label">Notes &amp; Context</div>`;
-  const notesInput = document.createElement('textarea');
-  notesInput.className = 'panel-notes-input';
-  notesInput.placeholder = 'Add context, blockers, links...';
-  notesInput.value = task.notes || '';
-  const syncNotes = debounce(v => syncTask(taskId, { notes: v }), 1000);
-  notesInput.addEventListener('input', () => {
-    task.notes = notesInput.value;
-    syncNotes(notesInput.value);
-  });
-  notesSection.appendChild(notesInput);
-  body.appendChild(notesSection);
+  // Editable field builder — read-only display with pencil-icon to edit
+  function buildField(label, value, placeholder, onSave) {
+    const PENCIL = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>`;
+    const wrap = document.createElement('div');
+    wrap.style.marginBottom = '16px';
+
+    const header = document.createElement('div');
+    header.className = 'panel-field-header';
+    header.innerHTML = `<span class="panel-section-label">${label}</span>`;
+    const editBtn = document.createElement('button');
+    editBtn.className = 'panel-field-edit-btn';
+    editBtn.title = 'Edit';
+    editBtn.innerHTML = PENCIL;
+    header.appendChild(editBtn);
+    wrap.appendChild(header);
+
+    let current = value || '';
+    const display = document.createElement('div');
+    display.className = 'panel-field-display' + (current ? '' : ' empty');
+    display.textContent = current || placeholder;
+    wrap.appendChild(display);
+
+    const textarea = document.createElement('textarea');
+    textarea.className = 'panel-notes-input';
+    textarea.style.display = 'none';
+    textarea.placeholder = placeholder;
+    textarea.value = current;
+    wrap.appendChild(textarea);
+
+    const syncSave = debounce(v => onSave(v), 800);
+
+    function startEdit() {
+      display.style.display = 'none';
+      textarea.style.display = '';
+      textarea.style.height = 'auto';
+      textarea.style.height = Math.max(textarea.scrollHeight, 60) + 'px';
+      textarea.focus();
+    }
+
+    function stopEdit() {
+      current = textarea.value;
+      display.textContent = current || placeholder;
+      display.className = 'panel-field-display' + (current ? '' : ' empty');
+      display.style.display = '';
+      textarea.style.display = 'none';
+      onSave(current);
+    }
+
+    editBtn.addEventListener('click', () => {
+      textarea.style.display === 'none' ? startEdit() : stopEdit();
+    });
+    textarea.addEventListener('blur', stopEdit);
+    textarea.addEventListener('keydown', e => {
+      if (e.key === 'Escape') { textarea.value = current; stopEdit(); }
+    });
+    textarea.addEventListener('input', () => {
+      textarea.style.height = 'auto';
+      textarea.style.height = Math.max(textarea.scrollHeight, 60) + 'px';
+      syncSave(textarea.value);
+    });
+
+    return wrap;
+  }
+
+  body.appendChild(buildField(
+    'Commit description', task.notes, 'Add commit notes...',
+    v => { task.notes = v; syncTask(taskId, { notes: v }); }
+  ));
+  body.appendChild(buildField(
+    'Outcomes', task.outcomes, 'Add outcomes...',
+    v => { task.outcomes = v; syncTask(taskId, { outcomes: v }); }
+  ));
 
   // Discussion section
   const discussion = document.createElement('div');
@@ -1881,7 +2023,9 @@ function saveColumns() {
 
 let currentVersion = 0;
 
-async function applyData(data) {
+async function applyData(data, isInitialLoad = false) {
+  if (isInitialLoad) dirtyTasks.clear();
+
   people.length = 0;
   people.push(...data.people);
 
@@ -1910,8 +2054,17 @@ async function applyData(data) {
   Object.keys(comments).forEach(k => delete comments[k]);
   if (data.comments) Object.assign(comments, data.comments);
 
+  const now = Date.now();
   data.people.forEach(p => p.tasks.forEach(t => {
-    taskStatus[t.id] = t.initialStatus;
+    const dirty = dirtyTasks.get(t.id);
+    if (dirty && (now - dirty.ts) < 60000) {
+      // Local change is newer than Notion — preserve it
+      if (dirty.weeklyStatus !== undefined) taskStatus[t.id] = dirty.weeklyStatus;
+      if (dirty.flagged !== undefined) t.flagged = dirty.flagged;
+    } else {
+      taskStatus[t.id] = t.initialStatus;
+      dirtyTasks.delete(t.id);
+    }
   }));
   saveStatus();
 
@@ -1929,7 +2082,7 @@ async function loadNotionData() {
     const data = await res.json();
     if (data.error) throw new Error(data.error);
 
-    await applyData(data);
+    await applyData(data, true);
   } catch (err) {
     document.getElementById('board').innerHTML =
       `<div style="padding:40px 32px;color:#f87171;font-size:14px">Failed to load from Notion: ${err.message}</div>`;
@@ -2061,6 +2214,32 @@ document.getElementById('discussionsBtn').addEventListener('click', () => {
 });
 
 document.getElementById('discSidebarClose').addEventListener('click', closeDiscussions);
+
+// ---- ZOOM CAP ----
+// Cap browser zoom at ~130%. We track devicePixelRatio (which scales with
+// browser zoom) relative to the value at page load. When zooming in would
+// push the ratio past the cap, we intercept and prevent the event.
+
+const BASE_DPR = window.devicePixelRatio;
+const ZOOM_CAP = 1.3; // 130%
+
+function getRelativeZoom() {
+  return window.devicePixelRatio / BASE_DPR;
+}
+
+document.addEventListener('wheel', e => {
+  if (!e.ctrlKey) return;
+  if (e.deltaY < 0 && getRelativeZoom() >= ZOOM_CAP) {
+    e.preventDefault();
+  }
+}, { passive: false });
+
+document.addEventListener('keydown', e => {
+  if (!e.ctrlKey) return;
+  if ((e.key === '=' || e.key === '+') && getRelativeZoom() >= ZOOM_CAP) {
+    e.preventDefault();
+  }
+}, { passive: false });
 </script>
 </body>
 </html>

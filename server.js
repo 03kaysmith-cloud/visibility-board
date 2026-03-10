@@ -256,7 +256,7 @@ async function pollForChanges() {
 
 // Warm cache on startup, then check for changes every 60 seconds
 refreshCache();
-setInterval(pollForChanges, 60 * 1000);
+setInterval(pollForChanges, 10 * 1000);
 
 // ---- ROUTES ----
 

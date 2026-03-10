@@ -541,6 +541,7 @@
     .panel-status-bar.planned { background: #44465a; }
     .panel-status-bar.doing   { background: #f59e0b; }
     .panel-status-bar.done    { background: #22c55e; }
+    .panel-status-bar.flagged { background: #f87171; }
 
     .panel-header-right {
       display: flex;
@@ -1637,7 +1638,8 @@ function openPanel(taskId) {
   headerTagsEl.innerHTML = `
     <span class="dept-tag ${d.cls} dept-tag-btn" id="panelDeptToggle" title="Click to change dept">${d.label}</span>`;
 
-  document.getElementById('panelStatusBar').className = `panel-status-bar ${weeklyStatus}`;
+  const barStatus = task.flagged ? 'flagged' : weeklyStatus;
+  document.getElementById('panelStatusBar').className = `panel-status-bar ${barStatus}`;
   document.getElementById('panelStatusDot').className = `task-status-tag ${weeklyStatus}`;
 
   // Editable task name

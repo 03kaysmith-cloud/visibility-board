@@ -525,10 +525,29 @@
       z-index: 210;
       display: flex;
       flex-direction: column;
+      overflow: hidden;
       transform: translate(-50%, -46%) scale(0.96);
       opacity: 0;
       pointer-events: none;
       transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s;
+    }
+
+    .panel-status-bar {
+      height: 4px;
+      width: 100%;
+      flex-shrink: 0;
+    }
+
+    .panel-status-bar.planned { background: #44465a; }
+    .panel-status-bar.doing   { background: #f59e0b; }
+    .panel-status-bar.done    { background: #22c55e; }
+
+    .panel-header-right {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 10px;
+      flex-shrink: 0;
     }
 
     .detail-panel.open {
@@ -652,18 +671,6 @@
       flex-wrap: wrap;
     }
 
-    .panel-status-tag {
-      display: inline-flex;
-      align-items: center;
-      font-size: 10px;
-      font-weight: 600;
-      padding: 2px 7px;
-      border-radius: 4px;
-      background: var(--surface-2);
-      color: var(--text-secondary);
-      border: 1px solid var(--border);
-      letter-spacing: 0.02em;
-    }
 
     .dept-tag-btn {
       cursor: pointer;
@@ -1196,13 +1203,17 @@
 
 <div class="panel-backdrop" id="backdrop"></div>
 <div class="detail-panel" id="detailPanel">
+  <div class="panel-status-bar" id="panelStatusBar"></div>
   <div class="panel-header">
     <div class="panel-header-left">
       <div class="panel-dept-tag" id="panelDeptTag"></div>
       <div class="panel-task-name" id="panelTaskName"></div>
       <div class="panel-person-line" id="panelPersonLine"></div>
     </div>
-    <button class="panel-close" id="panelClose">&#x2715;</button>
+    <div class="panel-header-right">
+      <span class="task-status-tag" id="panelStatusDot" style="cursor:default;opacity:0.8"></span>
+      <button class="panel-close" id="panelClose">&#x2715;</button>
+    </div>
   </div>
   <div class="panel-body" id="panelBody"></div>
 </div>
@@ -1624,9 +1635,10 @@ function openPanel(taskId) {
     document.getElementById('panelDeptTag').replaceWith(headerTagsEl);
   }
   headerTagsEl.innerHTML = `
-    <span class="dept-tag ${d.cls} dept-tag-btn" id="panelDeptToggle" title="Click to change dept">${d.label}</span>
-    ${task.status ? `<span class="panel-status-tag">${task.status}</span>` : ''}
-    <span class="task-status-tag ${weeklyStatus}" style="cursor:default">${weeklyStatus.charAt(0).toUpperCase()+weeklyStatus.slice(1)}</span>`;
+    <span class="dept-tag ${d.cls} dept-tag-btn" id="panelDeptToggle" title="Click to change dept">${d.label}</span>`;
+
+  document.getElementById('panelStatusBar').className = `panel-status-bar ${weeklyStatus}`;
+  document.getElementById('panelStatusDot').className = `task-status-tag ${weeklyStatus}`;
 
   // Editable task name
   const nameEl = document.getElementById('panelTaskName');

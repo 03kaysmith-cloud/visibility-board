@@ -1391,16 +1391,17 @@ function renderCard(person) {
 function renderBoardDept() {
   const board = document.getElementById('board');
   const DEPT_ORDER = [
-    { key: 'csm',     label: 'CSM',     cls: 'dept-csm'     },
-    { key: 'gtm',     label: 'GTM',     cls: 'dept-gtm'     },
-    { key: 'product', label: 'Product', cls: 'dept-product'  },
-    { key: 'revops',  label: 'RevOps',  cls: 'dept-revops'  },
+    { key: 'csm',     label: 'CSM',           cls: 'dept-csm'     },
+    { key: 'gtm',     label: 'GTM',           cls: 'dept-gtm'     },
+    { key: 'product', label: 'Product',       cls: 'dept-product'  },
+    { key: 'revops',  label: 'RevOps',        cls: 'dept-revops'  },
+    { key: '',        label: 'No Department', cls: ''              },
   ];
 
   const colsHtml = DEPT_ORDER.map(({ key, label, cls }) => {
     // Build per-dept person objects with only that dept's tasks
     const deptPeople = people
-      .map(p => ({ ...p, tasks: p.tasks.filter(t => t.dept === key) }))
+      .map(p => ({ ...p, tasks: p.tasks.filter(t => key === '' ? !t.dept : t.dept === key) }))
       .filter(p => p.tasks.length > 0 && (!filterNeedsHelp || p.tasks.some(t => t.flagged)) && matchesSearch(p));
 
     const sorted = sortPeople(deptPeople);
@@ -1435,8 +1436,6 @@ function renderBoard() {
         p && (!filterNeedsHelp || p.tasks.some(t => t.flagged)) && matchesSearch(p)
       )
     );
-    const isEmpty = col.peopleIds.length === 0;
-    const canRemove = state.columns.length > 1 && isEmpty;
     return `
       <div class="col" data-col-id="${col.id}">
         <div class="col-header">
@@ -1444,7 +1443,6 @@ function renderBoard() {
             <div class="col-title" data-col-title="${col.id}">${col.title}</div>
           </div>
           <div class="col-count">${colPeople.length}</div>
-          ${canRemove ? `<button class="col-remove-btn" data-remove-col="${col.id}" title="Remove empty column">&#x2715;</button>` : ''}
         </div>
         <div class="col-body" data-col-drop="${col.id}">
           ${colPeople.map(p => renderCard(p)).join('')}
@@ -1452,10 +1450,7 @@ function renderBoard() {
       </div>`;
   }).join('');
 
-  board.innerHTML = colsHtml + `
-    <div class="add-col-wrap">
-      <button class="add-col-btn" data-add-col="true" title="Add column">+</button>
-    </div>`;
+  board.innerHTML = colsHtml;
 
   updateFlagCounter();
   bindDrag();
@@ -1906,8 +1901,9 @@ async function applyData(data) {
       { id: 'col2', title: '', peopleIds: [] },
       { id: 'col3', title: '', peopleIds: [] },
       { id: 'col4', title: '', peopleIds: [] },
+      { id: 'col5', title: '', peopleIds: [] },
     ];
-    ids.forEach((id, i) => cols[i % 4].peopleIds.push(id));
+    ids.forEach((id, i) => cols[i % 5].peopleIds.push(id));
     state.columns = cols;
   }
 

@@ -275,9 +275,9 @@ async function buildTaskData() {
     const deptSel = (props.Department || {}).select || null;
     const deptName = deptSel ? deptSel.name : null;
 
-    if (!title || !statusName || !deptName) continue;
+    if (!title || !statusName) continue;
 
-    const deptKey = DEPT_MAP[deptName] || deptName.toLowerCase().replace(/\s+/g, '');
+    const deptKey = deptName ? (DEPT_MAP[deptName] || deptName.toLowerCase().replace(/\s+/g, '')) : '';
 
     const dateObj = (props['Week date'] || {}).date || null;
     const dateStr = dateObj ? dateObj.start : null;
@@ -303,7 +303,7 @@ async function buildTaskData() {
       peopleMap.set(name, {
         id: name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, ''),
         name,
-        role: deptName,
+        role: deptName || '',
         avatarColor: AVATAR_COLORS[colorIdx++ % AVATAR_COLORS.length],
         tasks: [],
       });

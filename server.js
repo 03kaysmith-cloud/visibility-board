@@ -5,6 +5,7 @@ const path = require('path');
 
 const NOTION_KEY = process.env.NOTION_KEY || 'ntn_o72845711711ULdEW2UsgsYj8DGvEumAimeXyivdNEYe7X';
 const DATABASE_ID = process.env.DATABASE_ID || '31c1b231bc238079a79decead097d0aa';
+const SLACK_TOKEN = process.env.SLACK_TOKEN || '';
 
 const AVATAR_COLORS = [
   '#6366f1','#ec4899','#14b8a6','#f59e0b','#3b82f6','#10b981','#8b5cf6','#ef4444',
@@ -56,6 +57,56 @@ function notionRequest(method, path, body) {
 
 const notionPost = (path, body) => notionRequest('POST', path, body);
 const notionGet  = (path)       => notionRequest('GET',  path, null);
+
+function slackGet(path) {
+  return new Promise((resolve, reject) => {
+    const req = https.request({
+      hostname: 'slack.com',
+      path,
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${SLACK_TOKEN}` },
+    }, res => {
+      let data = '';
+      res.on('data', c => { data += c; });
+      res.on('end', () => {
+        try { resolve(JSON.parse(data)); } catch (e) { reject(e); }
+      });
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+async function buildSlackAvatarMap() {
+  if (!SLACK_TOKEN) return {};
+  try {
+    const data = await slackGet('/api/users.list?limit=200');
+    if (!data.ok) { console.warn('[slack] users.list error:', data.error); return {}; }
+    const byFullName = {};
+    const byFirstName = {};
+    for (const m of (data.members || [])) {
+      if (m.deleted || m.is_bot || m.is_app_user) continue;
+      const avatarUrl = m.profile && (m.profile.image_192 || m.profile.image_72);
+      if (!avatarUrl) continue;
+      const full = (m.real_name || '').trim().toLowerCase();
+      if (full) byFullName[full] = avatarUrl;
+      const first = full.split(' ')[0];
+      if (first && !byFirstName[first]) byFirstName[first] = avatarUrl;
+    }
+    return { byFullName, byFirstName };
+  } catch (err) {
+    console.warn('[slack] avatar fetch failed:', err.message);
+    return {};
+  }
+}
+
+function resolveSlackAvatar(name, avatarMap) {
+  if (!avatarMap || !avatarMap.byFullName) return null;
+  const lower = name.toLowerCase();
+  if (avatarMap.byFullName[lower]) return avatarMap.byFullName[lower];
+  const first = lower.split(' ')[0];
+  return avatarMap.byFirstName[first] || null;
+}
 
 function authorColor(name) {
   let hash = 0;
@@ -195,6 +246,11 @@ async function buildTaskData() {
       due,
       initialStatus,
     });
+  }
+
+  const slackAvatarMap = await buildSlackAvatarMap();
+  for (const person of peopleMap.values()) {
+    person.avatarUrl = resolveSlackAvatar(person.name, slackAvatarMap);
   }
 
   const includedIds = [...new Set(

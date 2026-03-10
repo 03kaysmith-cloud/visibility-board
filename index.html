@@ -352,6 +352,14 @@
       color: rgba(255,255,255,0.9);
       flex-shrink: 0;
       letter-spacing: 0.01em;
+      overflow: hidden;
+    }
+
+    .avatar img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      border-radius: 50%;
     }
 
     .person-info {
@@ -1333,7 +1341,10 @@ function renderCard(person) {
   return `
     <div class="card${isCollapsed ? ' collapsed' : ''}" draggable="true" data-person-id="${person.id}">
       <div class="card-person">
-        <div class="avatar" style="background:${person.avatarColor}">${initials(person.name)}</div>
+        ${person.avatarUrl
+          ? `<div class="avatar"><img src="${person.avatarUrl}" alt="${person.name}" /></div>`
+          : `<div class="avatar" style="background:${person.avatarColor}">${initials(person.name)}</div>`
+        }
         <div class="person-info">
           <div class="person-name">${person.name}</div>
           <div class="person-role">${person.role}</div>
@@ -1732,7 +1743,10 @@ function handleMentionTrigger(textarea, taskId) {
 
   drop.innerHTML = matches.map(p =>
     `<div class="mention-option" data-name="${p.name}">
-      <div class="comment-avatar" style="background:${p.avatarColor};width:20px;height:20px;font-size:9px">${initials(p.name)}</div>
+      ${p.avatarUrl
+        ? `<div class="comment-avatar" style="width:20px;height:20px;overflow:hidden"><img src="${p.avatarUrl}" style="width:100%;height:100%;border-radius:50%;object-fit:cover" alt="${p.name}" /></div>`
+        : `<div class="comment-avatar" style="background:${p.avatarColor};width:20px;height:20px;font-size:9px">${initials(p.name)}</div>`
+      }
       ${p.name}
     </div>`
   ).join('');

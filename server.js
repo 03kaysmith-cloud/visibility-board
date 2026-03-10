@@ -78,6 +78,19 @@ function slackGet(path) {
   });
 }
 
+async function fetchAllSlackUsers() {
+  const members = [];
+  let cursor = '';
+  do {
+    const path = `/api/users.list?limit=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
+    const data = await slackGet(path);
+    if (!data.ok) { console.warn('[slack] users.list error:', data.error); break; }
+    members.push(...(data.members || []));
+    cursor = data.response_metadata && data.response_metadata.next_cursor || '';
+  } while (cursor);
+  return members;
+}
+
 function anthropicPost(body) {
   return new Promise((resolve, reject) => {
     const payload = JSON.stringify(body);
@@ -110,10 +123,9 @@ let slackAvatarCache = null;
 async function refreshSlackAvatarCache(notionNames) {
   if (!SLACK_TOKEN) { slackAvatarCache = {}; return; }
   try {
-    const data = await slackGet('/api/users.list?limit=200');
-    if (!data.ok) { console.warn('[slack] users.list error:', data.error); slackAvatarCache = {}; return; }
+    const allMembers = await fetchAllSlackUsers();
 
-    const slackUsers = (data.members || [])
+    const slackUsers = allMembers
       .filter(m => !m.deleted && !m.is_bot && !m.is_app_user)
       .map(m => ({
         real_name:    (m.real_name || '').trim(),

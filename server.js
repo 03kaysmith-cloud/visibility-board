@@ -3,13 +3,8 @@ const express = require('express');
 const https = require('https');
 const path = require('path');
 
-const NOTION_KEY = process.env.NOTION_KEY;
-const DATABASE_ID = process.env.DATABASE_ID;
-
-if (!NOTION_KEY || !DATABASE_ID) {
-  console.error('Missing required env vars: NOTION_KEY and DATABASE_ID');
-  process.exit(1);
-}
+const NOTION_KEY = process.env.NOTION_KEY || 'ntn_o72845711711ULdEW2UsgsYj8DGvEumAimeXyivdNEYe7X';
+const DATABASE_ID = process.env.DATABASE_ID || '31c1b231bc238079a79decead097d0aa';
 
 const AVATAR_COLORS = [
   '#6366f1','#ec4899','#14b8a6','#f59e0b','#3b82f6','#10b981','#8b5cf6','#ef4444',

@@ -989,6 +989,156 @@
       border-radius: 6px;
       letter-spacing: 0.04em;
     }
+
+    /* ---- DISCUSSION BUTTON ---- */
+    .discussions-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 5px 12px 5px 10px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      cursor: pointer;
+      transition: background 0.12s, color 0.12s;
+    }
+    .discussions-btn:hover { background: var(--surface-hover); color: var(--text-primary); }
+    .discussions-btn.active {
+      background: rgba(167,139,250,0.12);
+      border-color: rgba(167,139,250,0.3);
+      color: #a78bfa;
+    }
+    .discussions-btn .disc-count {
+      background: rgba(167,139,250,0.2);
+      color: #a78bfa;
+      border-radius: 10px;
+      padding: 1px 6px;
+      font-size: 11px;
+    }
+    .discussions-btn .disc-count.zero { display: none; }
+
+    /* ---- DISCUSSIONS SIDEBAR ---- */
+    .disc-sidebar {
+      position: fixed;
+      top: 58px;
+      right: 0;
+      bottom: 0;
+      width: 360px;
+      background: var(--surface);
+      border-left: 1px solid var(--border);
+      z-index: 150;
+      display: flex;
+      flex-direction: column;
+      transform: translateX(100%);
+      transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .disc-sidebar.open { transform: translateX(0); }
+
+    .disc-sidebar-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .disc-sidebar-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+    .disc-sidebar-close {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 16px;
+      padding: 2px 6px;
+      border-radius: 6px;
+      transition: background 0.12s, color 0.12s;
+    }
+    .disc-sidebar-close:hover { background: var(--surface-hover); color: var(--text-primary); }
+
+    .disc-sidebar-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .disc-item {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 14px;
+      cursor: pointer;
+      transition: background 0.12s, border-color 0.12s;
+    }
+    .disc-item:hover { background: var(--surface-hover); border-color: rgba(255,255,255,0.12); }
+
+    .disc-item-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .disc-item-task { font-size: 13px; font-weight: 600; color: var(--text-primary); line-height: 1.3; }
+    .disc-item-person { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+    .disc-item-count {
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--text-muted);
+      background: rgba(255,255,255,0.06);
+      border-radius: 10px;
+      padding: 2px 7px;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    .disc-latest {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+    }
+    .disc-latest-avatar {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      font-size: 9px;
+      font-weight: 700;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+    .disc-latest-body { flex: 1; min-width: 0; }
+    .disc-latest-meta {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 3px;
+    }
+    .disc-latest-author { font-size: 11px; font-weight: 600; color: var(--text-secondary); }
+    .disc-latest-time { font-size: 10px; color: var(--text-muted); }
+    .disc-latest-text {
+      font-size: 12px;
+      color: var(--text-secondary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* dim board when sidebar open */
+    .board-dimmed { opacity: 0.4; pointer-events: none; transition: opacity 0.22s; }
   </style>
 </head>
 <body>
@@ -1018,8 +1168,21 @@
       <div class="flag-dot"></div>
       <span id="flagCount">0</span> need help
     </div>
+    <button class="discussions-btn" id="discussionsBtn">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M14 1H2C1.45 1 1 1.45 1 2v9c0 .55.45 1 1 1h2v3l3-3h7c.55 0 1-.45 1-1V2c0-.55-.45-1-1-1z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+      Discussions
+      <span class="disc-count zero" id="discCount">0</span>
+    </button>
   </div>
 </header>
+
+<div class="disc-sidebar" id="discSidebar">
+  <div class="disc-sidebar-header">
+    <div class="disc-sidebar-title">Discussions</div>
+    <button class="disc-sidebar-close" id="discSidebarClose">&#x2715;</button>
+  </div>
+  <div class="disc-sidebar-body" id="discSidebarBody"></div>
+</div>
 
 <div class="board" id="board"></div>
 
@@ -1264,6 +1427,8 @@ function updateFlagCounter() {
   const total = people.reduce((acc, p) => acc + p.tasks.filter(t => t.flagged).length, 0);
   document.getElementById('flagCount').textContent = total;
   document.getElementById('globalFlagCounter').classList.toggle('zero', total === 0);
+  updateDiscussionsCount();
+  if (discussionsOpen) renderDiscussionsSidebar();
 }
 
 // ---- DRAG & DROP ----
@@ -1594,7 +1759,7 @@ function postComment(taskId) {
   const time = now.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true }).replace(',', ',');
 
   if (!comments[taskId]) comments[taskId] = [];
-  comments[taskId].push({ author: 'Kay', color: '#6366f1', time, text });
+  comments[taskId].push({ author: 'Kay', color: '#6366f1', time, ts: Date.now(), text });
 
   const list = document.getElementById(`commentList-${taskId}`);
   const div = document.createElement('div');
@@ -1764,6 +1929,88 @@ document.getElementById('searchClear').addEventListener('click', () => {
   document.getElementById('searchClear').classList.remove('visible');
   renderBoard();
 });
+
+// ---- DISCUSSIONS SIDEBAR ----
+
+let discussionsOpen = false;
+
+function updateDiscussionsCount() {
+  const count = Object.keys(comments).filter(id => (comments[id] || []).length > 0).length;
+  const el = document.getElementById('discCount');
+  el.textContent = count;
+  el.classList.toggle('zero', count === 0);
+}
+
+function renderDiscussionsSidebar() {
+  const body = document.getElementById('discSidebarBody');
+
+  // Build list of tasks with comments, sorted by most recent comment ts
+  const entries = Object.entries(comments)
+    .filter(([, list]) => list.length > 0)
+    .map(([taskId, list]) => {
+      const latest = list.reduce((a, b) => ((b.ts || 0) > (a.ts || 0) ? b : a));
+      return { taskId, list, latest, latestTs: latest.ts || 0 };
+    })
+    .filter(({ taskId }) => taskMap[taskId])
+    .sort((a, b) => b.latestTs - a.latestTs);
+
+  if (!entries.length) {
+    body.innerHTML = '<div style="padding:32px 20px;color:var(--text-muted);font-size:13px;text-align:center">No discussions yet</div>';
+    return;
+  }
+
+  body.innerHTML = entries.map(({ taskId, list, latest }) => {
+    const { task, person } = taskMap[taskId];
+    return `
+      <div class="disc-item" data-disc-task="${taskId}">
+        <div class="disc-item-header">
+          <div>
+            <div class="disc-item-task">${task.name}</div>
+            <div class="disc-item-person">${person.name} &middot; ${person.role}</div>
+          </div>
+          <div class="disc-item-count">${list.length} comment${list.length !== 1 ? 's' : ''}</div>
+        </div>
+        <div class="disc-latest">
+          <div class="disc-latest-avatar" style="background:${latest.color}">${initials(latest.author)}</div>
+          <div class="disc-latest-body">
+            <div class="disc-latest-meta">
+              <span class="disc-latest-author">${latest.author}</span>
+              <span class="disc-latest-time">${latest.time}</span>
+            </div>
+            <div class="disc-latest-text">${latest.text}</div>
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+
+  body.querySelectorAll('[data-disc-task]').forEach(el => {
+    el.addEventListener('click', () => {
+      closeDiscussions();
+      openPanel(el.dataset.discTask);
+    });
+  });
+}
+
+function openDiscussions() {
+  discussionsOpen = true;
+  renderDiscussionsSidebar();
+  document.getElementById('discSidebar').classList.add('open');
+  document.getElementById('board').classList.add('board-dimmed');
+  document.getElementById('discussionsBtn').classList.add('active');
+}
+
+function closeDiscussions() {
+  discussionsOpen = false;
+  document.getElementById('discSidebar').classList.remove('open');
+  document.getElementById('board').classList.remove('board-dimmed');
+  document.getElementById('discussionsBtn').classList.remove('active');
+}
+
+document.getElementById('discussionsBtn').addEventListener('click', () => {
+  discussionsOpen ? closeDiscussions() : openDiscussions();
+});
+
+document.getElementById('discSidebarClose').addEventListener('click', closeDiscussions);
 </script>
 </body>
 </html>

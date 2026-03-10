@@ -78,6 +78,7 @@ async function fetchPageComments(pageId) {
         author: c.created_by?.name || 'Unknown',
         color:  authorColor(c.created_by?.name),
         time:   formatNotionTime(c.created_time),
+        ts:     new Date(c.created_time).getTime(),
         text:   c.rich_text.map(t => t.plain_text).join(''),
       }));
   } catch {

@@ -1231,6 +1231,19 @@ const AVATARS = [
   '#6366f1','#ec4899','#14b8a6','#f59e0b','#3b82f6','#10b981','#8b5cf6','#ef4444'
 ];
 
+function debounce(fn, ms) {
+  let t;
+  return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+}
+
+function syncTask(taskId, changes) {
+  fetch(`/api/tasks/${taskId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(changes),
+  }).catch(err => console.warn('[sync]', err));
+}
+
 function initials(name) {
   return name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
 }
@@ -1556,6 +1569,7 @@ function initBoardClicks() {
       taskStatus[id] = next;
       saveStatus();
       renderBoard();
+      syncTask(id, { weeklyStatus: next, flagged: taskMap[id] ? taskMap[id].task.flagged : false });
       return;
     }
 
@@ -1647,11 +1661,13 @@ function openPanel(taskId) {
   nameEl.innerHTML = `<textarea class="panel-task-name-input" id="panelNameInput" rows="1">${task.name}</textarea>`;
   const nameInput = document.getElementById('panelNameInput');
   nameInput.style.height = nameInput.scrollHeight + 'px';
+  const syncName = debounce(v => syncTask(taskId, { name: v }), 1000);
   nameInput.addEventListener('input', () => {
     nameInput.style.height = 'auto';
     nameInput.style.height = nameInput.scrollHeight + 'px';
     task.name = nameInput.value;
     renderBoard();
+    syncName(nameInput.value);
   });
 
   // Dept cycle on click
@@ -1660,6 +1676,7 @@ function openPanel(taskId) {
     task.dept = deptCycle[(idx + 1) % deptCycle.length];
     openPanel(taskId);
     renderBoard();
+    syncTask(taskId, { dept: task.dept });
   });
 
   const body = document.getElementById('panelBody');
@@ -1679,6 +1696,7 @@ function openPanel(taskId) {
     task.flagged = !task.flagged;
     openPanel(taskId);
     renderBoard();
+    syncTask(taskId, { flagged: task.flagged, weeklyStatus: taskStatus[taskId] || task.initialStatus });
   });
 
   document.getElementById('panelDeleteTask').addEventListener('click', () => {
@@ -1687,6 +1705,7 @@ function openPanel(taskId) {
     delete taskMap[taskId];
     closePanel();
     renderBoard();
+    fetch(`/api/tasks/${taskId}`, { method: 'DELETE' }).catch(err => console.warn('[sync] delete failed:', err));
   });
 
   // Notes
@@ -1696,7 +1715,11 @@ function openPanel(taskId) {
   notesInput.className = 'panel-notes-input';
   notesInput.placeholder = 'Add context, blockers, links...';
   notesInput.value = task.notes || '';
-  notesInput.addEventListener('input', () => { task.notes = notesInput.value; });
+  const syncNotes = debounce(v => syncTask(taskId, { notes: v }), 1000);
+  notesInput.addEventListener('input', () => {
+    task.notes = notesInput.value;
+    syncNotes(notesInput.value);
+  });
   notesSection.appendChild(notesInput);
   body.appendChild(notesSection);
 

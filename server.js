@@ -414,6 +414,52 @@ app.get('/api/tasks', async (req, res) => {
   }
 });
 
+const DEPT_LABEL = Object.fromEntries(Object.entries(DEPT_MAP).map(([k, v]) => [v, k]));
+
+function notionStatusName(weeklyStatus, flagged) {
+  if (flagged) return 'Needs Help';
+  if (weeklyStatus === 'done')  return 'Done';
+  if (weeklyStatus === 'doing') return 'Doing';
+  return 'To Do';
+}
+
+app.patch('/api/tasks/:id', express.json(), async (req, res) => {
+  const { name, dept, flagged, notes, weeklyStatus } = req.body;
+  const properties = {};
+
+  if (name !== undefined)
+    properties['Task'] = { title: [{ text: { content: name } }] };
+
+  if (dept !== undefined)
+    properties['Department'] = { select: { name: DEPT_LABEL[dept] || dept } };
+
+  if (flagged !== undefined || weeklyStatus !== undefined)
+    properties['Status'] = { select: { name: notionStatusName(weeklyStatus, flagged) } };
+
+  if (notes !== undefined)
+    properties['Commit description'] = { rich_text: notes ? [{ text: { content: notes } }] : [] };
+
+  try {
+    await notionRequest('PATCH', `/v1/pages/${req.params.id}`, { properties });
+    refreshCache();
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[sync] patch failed:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/tasks/:id', async (req, res) => {
+  try {
+    await notionRequest('PATCH', `/v1/pages/${req.params.id}`, { archived: true });
+    refreshCache();
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[sync] delete failed:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.use(express.static(__dirname));
 
 const PORT = process.env.PORT || 3000;

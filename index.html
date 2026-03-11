@@ -397,15 +397,27 @@
       border-radius: var(--radius-sm);
       background: var(--surface-2);
       cursor: pointer;
-      transition: background 0.15s, transform 0.15s, margin-top 0.14s ease, margin-bottom 0.14s ease, opacity 0.15s;
+      transition: background 0.15s, transform 0.15s;
       position: relative;
     }
 
     .task:hover { background: var(--surface-hover); transform: scale(1.02); z-index: 1; }
 
     .task.dragging { opacity: 0.35; transform: scale(0.98); cursor: grabbing; }
-    .task.drag-before { margin-top: 48px; }
-    .task.drag-after  { margin-bottom: 48px; }
+
+    .task.drop-line-before::before,
+    .task.drop-line-after::after {
+      content: '';
+      position: absolute;
+      left: 4px;
+      right: 4px;
+      height: 2px;
+      background: #60a5fa;
+      border-radius: 1px;
+      z-index: 2;
+    }
+    .task.drop-line-before::before { top: -3px; }
+    .task.drop-line-after::after   { bottom: -3px; }
 
     .task.state-planned { border-left: 4px solid #44465a; background: #1e1f23; }
     .task.state-doing   { border-left: 4px solid #f59e0b; background: #1e1f23; }
@@ -1538,6 +1550,45 @@ function updateFlagCounter() {
   if (discussionsOpen) renderDiscussionsSidebar();
 }
 
+// ---- TASK POSITION ON STATUS CHANGE ----
+// When cycling status, move task to the edge of the new group closest to its old group,
+// so movement on screen is always minimal.
+function repositionOnStatusChange(taskId, prevStatus, nextStatus) {
+  const entry = taskMap[taskId];
+  if (!entry) return;
+  const personId = entry.person.id;
+  const prevOrder = STATUS_ORDER['state-' + prevStatus] ?? 3;
+  const nextOrder = STATUS_ORDER['state-' + nextStatus] ?? 3;
+  if (prevOrder === nextOrder) return;
+
+  const person = entry.person;
+  // sortTasks now uses the updated taskStatus
+  const sorted = sortTasks(person.tasks, personId);
+  const without = sorted.map(t => t.id).filter(id => id !== taskId);
+
+  // Find tasks now in the target group
+  const inNewGroup = without.filter(id => {
+    const t = person.tasks.find(t => t.id === id);
+    if (!t) return false;
+    const s = t.flagged ? 'state-flagged' : ('state-' + (taskStatus[id] || 'planned'));
+    return (STATUS_ORDER[s] ?? 3) === nextOrder;
+  });
+
+  let insertIdx;
+  if (nextOrder < prevOrder) {
+    // Moving up the list → bottom of new group (closest to old position below)
+    const last = inNewGroup[inNewGroup.length - 1];
+    insertIdx = last !== undefined ? without.indexOf(last) + 1 : 0;
+  } else {
+    // Moving down the list → top of new group (closest to old position above)
+    const first = inNewGroup[0];
+    insertIdx = first !== undefined ? without.indexOf(first) : without.length;
+  }
+
+  without.splice(insertIdx, 0, taskId);
+  saveTaskOrder(personId, without);
+}
+
 // ---- TASK DRAG & DROP ----
 
 let dragTaskId = null;
@@ -1545,8 +1596,8 @@ let dragPersonId = null;
 let dragTaskStatus = null;
 
 function clearTaskDragOver() {
-  document.querySelectorAll('.task.drag-before, .task.drag-after').forEach(el => {
-    el.classList.remove('drag-before', 'drag-after');
+  document.querySelectorAll('.task.drop-line-before, .task.drop-line-after').forEach(el => {
+    el.classList.remove('drop-line-before', 'drop-line-after');
     delete el.dataset.dragPos;
   });
 }
@@ -1585,12 +1636,12 @@ function bindTaskDrag() {
       const rect = el.getBoundingClientRect();
       const pos = e.clientY < rect.top + rect.height / 2 ? 'before' : 'after';
       el.dataset.dragPos = pos;
-      el.classList.add('drag-' + pos);
+      el.classList.add('drop-line-' + pos);
     });
 
     el.addEventListener('dragleave', e => {
       if (!el.contains(e.relatedTarget)) {
-        el.classList.remove('drag-before', 'drag-after');
+        el.classList.remove('drop-line-before', 'drop-line-after');
         delete el.dataset.dragPos;
       }
     });
@@ -1713,6 +1764,7 @@ function initBoardClicks() {
       taskStatus[id] = next;
       saveStatus();
       markDirty(id);
+      repositionOnStatusChange(id, current, next);
       renderBoard();
       syncTask(id, { weeklyStatus: next, flagged: taskMap[id] ? taskMap[id].task.flagged : false });
       return;
@@ -1835,6 +1887,7 @@ function openPanel(taskId) {
       saveStatus();
     }
     markDirty(taskId);
+    repositionOnStatusChange(taskId, currentState, nextState);
     renderBoard();
     openPanel(taskId);
     syncTask(taskId, { weeklyStatus: taskStatus[taskId] || task.initialStatus, flagged: task.flagged });

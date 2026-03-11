@@ -405,6 +405,21 @@
 
     .task.dragging { opacity: 0.35; transform: scale(0.98); cursor: grabbing; }
 
+    @keyframes status-flash {
+      from { opacity: 1; }
+      to   { opacity: 0; }
+    }
+    .task.status-flash::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: inherit;
+      background: var(--flash-color, rgba(255,255,255,0.15));
+      animation: status-flash 0.5s ease-out forwards;
+      pointer-events: none;
+      z-index: 1;
+    }
+
     .task.drop-line-before::before,
     .task.drop-line-after::after {
       content: '';
@@ -1514,6 +1529,7 @@ function renderBoardDept() {
   board.innerHTML = colsHtml;
   updateFlagCounter();
   bindTaskDrag();
+  applyPendingFlashes();
 }
 
 function renderBoard() {
@@ -1540,6 +1556,7 @@ function renderBoard() {
   updateFlagCounter();
   bindColTitleEdit();
   bindTaskDrag();
+  applyPendingFlashes();
 }
 
 function updateFlagCounter() {
@@ -1548,6 +1565,37 @@ function updateFlagCounter() {
   document.getElementById('globalFlagCounter').classList.toggle('zero', total === 0);
   updateDiscussionsCount();
   if (discussionsOpen) renderDiscussionsSidebar();
+}
+
+// ---- STATUS CHANGE FLASH ----
+
+const FLASH_COLORS = {
+  planned: 'rgba(120,124,180,0.55)',
+  doing:   'rgba(251,191,36,0.55)',
+  done:    'rgba(74,222,128,0.55)',
+  flagged: 'rgba(252,165,165,0.55)',
+};
+
+const pendingFlash = new Map(); // taskId -> status
+
+function flashTask(taskId, status) {
+  pendingFlash.set(taskId, status);
+}
+
+function applyPendingFlashes() {
+  pendingFlash.forEach((status, taskId) => {
+    const el = document.querySelector(`.task[data-task-id="${taskId}"]`);
+    if (!el) return;
+    el.style.setProperty('--flash-color', FLASH_COLORS[status] || 'rgba(255,255,255,0.2)');
+    el.classList.remove('status-flash');
+    void el.offsetWidth; // force reflow so animation restarts
+    el.classList.add('status-flash');
+    el.addEventListener('animationend', () => {
+      el.classList.remove('status-flash');
+      el.style.removeProperty('--flash-color');
+    }, { once: true });
+  });
+  pendingFlash.clear();
 }
 
 // ---- TASK POSITION ON STATUS CHANGE ----
@@ -1784,6 +1832,7 @@ function initBoardClicks() {
       saveStatus();
       markDirty(id);
       repositionOnStatusChange(id, current, next);
+      flashTask(id, next);
       renderBoard();
       syncTask(id, { weeklyStatus: next, flagged: taskMap[id] ? taskMap[id].task.flagged : false });
       return;
@@ -1907,6 +1956,7 @@ function openPanel(taskId) {
     }
     markDirty(taskId);
     repositionOnStatusChange(taskId, currentState, nextState);
+    flashTask(taskId, nextState);
     renderBoard();
     openPanel(taskId);
     syncTask(taskId, { weeklyStatus: taskStatus[taskId] || task.initialStatus, flagged: task.flagged });

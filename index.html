@@ -397,11 +397,15 @@
       border-radius: var(--radius-sm);
       background: var(--surface-2);
       cursor: pointer;
-      transition: background 0.15s, transform 0.15s;
+      transition: background 0.15s, transform 0.15s, margin-top 0.14s ease, margin-bottom 0.14s ease, opacity 0.15s;
       position: relative;
     }
 
     .task:hover { background: var(--surface-hover); transform: scale(1.02); z-index: 1; }
+
+    .task.dragging { opacity: 0.35; transform: scale(0.98); cursor: grabbing; }
+    .task.drag-before { margin-top: 48px; }
+    .task.drag-after  { margin-bottom: 48px; }
 
     .task.state-planned { border-left: 4px solid #44465a; background: #1e1f23; }
     .task.state-doing   { border-left: 4px solid #f59e0b; background: #1e1f23; }
@@ -1375,10 +1379,26 @@ function taskStateClass(task) {
 
 const STATUS_ORDER = { 'state-flagged': 0, 'state-done': 1, 'state-doing': 2, 'state-planned': 3 };
 
-function sortTasks(tasks) {
-  return [...tasks].sort((a, b) =>
-    (STATUS_ORDER[taskStateClass(a)] ?? 3) - (STATUS_ORDER[taskStateClass(b)] ?? 3)
-  );
+function loadTaskOrder() {
+  try { return JSON.parse(localStorage.getItem('vb_task_order') || '{}'); }
+  catch { return {}; }
+}
+
+function saveTaskOrder(personId, orderedIds) {
+  const all = loadTaskOrder();
+  all[personId] = orderedIds;
+  localStorage.setItem('vb_task_order', JSON.stringify(all));
+}
+
+function sortTasks(tasks, personId) {
+  const order = personId ? (loadTaskOrder()[personId] || []) : [];
+  const orderMap = Object.fromEntries(order.map((id, i) => [id, i]));
+  return [...tasks].sort((a, b) => {
+    const sa = STATUS_ORDER[taskStateClass(a)] ?? 3;
+    const sb = STATUS_ORDER[taskStateClass(b)] ?? 3;
+    if (sa !== sb) return sa - sb;
+    return (orderMap[a.id] ?? Infinity) - (orderMap[b.id] ?? Infinity);
+  });
 }
 
 function deptTag(dept) {
@@ -1394,7 +1414,7 @@ function renderTask(task) {
   const statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
   const stateClass = taskStateClass(task);
   return `
-    <div class="task ${stateClass}" data-task-id="${task.id}">
+    <div class="task ${stateClass}" data-task-id="${task.id}" draggable="true">
       <div class="task-body">
         <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:6px">
           <div class="task-name">${task.name}</div>
@@ -1420,7 +1440,7 @@ function renderCard(person) {
     if (searchQuery && !personNameMatches && !t.name.toLowerCase().includes(searchQuery.toLowerCase())) return false;
     return true;
   });
-  const sorted = sortTasks(visibleTasks);
+  const sorted = sortTasks(visibleTasks, person.id);
   const flaggedCount = visibleTasks.filter(t => t.flagged).length;
   const metaHtml = flaggedCount > 0
     ? `<div class="card-meta">${visibleTasks.length} tasks<span class="help-count">${flaggedCount} need help</span></div>`
@@ -1481,6 +1501,7 @@ function renderBoardDept() {
 
   board.innerHTML = colsHtml;
   updateFlagCounter();
+  bindTaskDrag();
 }
 
 function renderBoard() {
@@ -1506,6 +1527,7 @@ function renderBoard() {
 
   updateFlagCounter();
   bindColTitleEdit();
+  bindTaskDrag();
 }
 
 function updateFlagCounter() {
@@ -1514,6 +1536,88 @@ function updateFlagCounter() {
   document.getElementById('globalFlagCounter').classList.toggle('zero', total === 0);
   updateDiscussionsCount();
   if (discussionsOpen) renderDiscussionsSidebar();
+}
+
+// ---- TASK DRAG & DROP ----
+
+let dragTaskId = null;
+let dragPersonId = null;
+let dragTaskStatus = null;
+
+function clearTaskDragOver() {
+  document.querySelectorAll('.task.drag-before, .task.drag-after').forEach(el => {
+    el.classList.remove('drag-before', 'drag-after');
+    delete el.dataset.dragPos;
+  });
+}
+
+function bindTaskDrag() {
+  document.querySelectorAll('.task[draggable]').forEach(el => {
+    el.addEventListener('dragstart', e => {
+      dragTaskId = el.dataset.taskId;
+      const card = el.closest('[data-person-id]');
+      dragPersonId = card ? card.dataset.personId : null;
+      dragTaskStatus = taskStateClass(taskMap[dragTaskId]);
+      setTimeout(() => el.classList.add('dragging'), 0);
+      e.dataTransfer.effectAllowed = 'move';
+      e.stopPropagation();
+    });
+
+    el.addEventListener('dragend', () => {
+      el.classList.remove('dragging');
+      clearTaskDragOver();
+      dragTaskId = null;
+      dragPersonId = null;
+      dragTaskStatus = null;
+    });
+
+    el.addEventListener('dragover', e => {
+      if (!dragTaskId) return;
+      const targetStatus = taskStateClass(taskMap[el.dataset.taskId]);
+      if (targetStatus !== dragTaskStatus || el.dataset.taskId === dragTaskId) {
+        e.dataTransfer.dropEffect = 'none';
+        return;
+      }
+      e.preventDefault();
+      e.stopPropagation();
+      e.dataTransfer.dropEffect = 'move';
+      clearTaskDragOver();
+      const rect = el.getBoundingClientRect();
+      const pos = e.clientY < rect.top + rect.height / 2 ? 'before' : 'after';
+      el.dataset.dragPos = pos;
+      el.classList.add('drag-' + pos);
+    });
+
+    el.addEventListener('dragleave', e => {
+      if (!el.contains(e.relatedTarget)) {
+        el.classList.remove('drag-before', 'drag-after');
+        delete el.dataset.dragPos;
+      }
+    });
+
+    el.addEventListener('drop', e => {
+      e.preventDefault();
+      e.stopPropagation();
+      const targetId = el.dataset.taskId;
+      const pos = el.dataset.dragPos || 'after';
+      clearTaskDragOver();
+      if (!dragTaskId || dragTaskId === targetId || !dragPersonId) return;
+
+      const person = people.find(p => p.id === dragPersonId);
+      if (!person) return;
+
+      const sorted = sortTasks(person.tasks, dragPersonId);
+      const ids = sorted.map(t => t.id);
+      const fromIdx = ids.indexOf(dragTaskId);
+      if (fromIdx !== -1) ids.splice(fromIdx, 1);
+      const toIdx = ids.indexOf(targetId);
+      if (toIdx === -1) return;
+      ids.splice(pos === 'before' ? toIdx : toIdx + 1, 0, dragTaskId);
+
+      saveTaskOrder(dragPersonId, ids);
+      renderBoard();
+    });
+  });
 }
 
 // ---- AUTO-BALANCE COLUMNS ----

@@ -1710,7 +1710,7 @@ function openPanel(taskId) {
     dotEl.title = 'Needs help — click to cycle status';
   } else {
     dotEl.className = `task-status-tag ${weeklyStatus}`;
-    dotEl.style.cssText = 'cursor:pointer;opacity:0.8;flex-shrink:0';
+    dotEl.style.cssText = 'cursor:pointer;opacity:0.8;flex-shrink:0;width:16px;height:16px;padding:0;box-sizing:border-box';
     dotEl.textContent = '';
     dotEl.title = `${weeklyStatus} — click to cycle status`;
   }

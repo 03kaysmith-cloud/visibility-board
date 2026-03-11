@@ -450,9 +450,13 @@
       transition: opacity 0.1s, transform 0.1s;
       opacity: 0.65;
       flex-shrink: 0;
-      padding: 8px;
-      background-clip: content-box;
-      box-sizing: content-box;
+      position: relative;
+    }
+
+    .task-status-tag::before {
+      content: '';
+      position: absolute;
+      inset: -8px;
     }
 
     .task-status-tag:hover { opacity: 1; transform: scale(1.2); }
@@ -1785,78 +1789,110 @@ function openPanel(taskId) {
     fetch(`/api/tasks/${taskId}`, { method: 'DELETE' }).catch(err => console.warn('[sync] delete failed:', err));
   });
 
-  // Editable field builder — read-only display with pencil-icon to edit
-  function buildField(label, value, placeholder, onSave) {
+  // Combined notes + outcomes section
+  function buildNotesSection() {
     const PENCIL = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>`;
     const wrap = document.createElement('div');
     wrap.style.marginBottom = '16px';
+    let editing = false;
+    let notesTA, outcomesTA;
 
-    const header = document.createElement('div');
-    header.className = 'panel-field-header';
-    header.innerHTML = `<span class="panel-section-label">${label}</span>`;
-    const editBtn = document.createElement('button');
-    editBtn.className = 'panel-field-edit-btn';
-    editBtn.title = 'Edit';
-    editBtn.innerHTML = PENCIL;
-    header.appendChild(editBtn);
-    wrap.appendChild(header);
-
-    let current = value || '';
-    const display = document.createElement('div');
-    display.className = 'panel-field-display' + (current ? '' : ' empty');
-    display.textContent = current || placeholder;
-    wrap.appendChild(display);
-
-    const textarea = document.createElement('textarea');
-    textarea.className = 'panel-notes-input';
-    textarea.style.display = 'none';
-    textarea.placeholder = placeholder;
-    textarea.value = current;
-    wrap.appendChild(textarea);
-
-    const syncSave = debounce(v => onSave(v), 800);
-
-    function startEdit() {
-      display.style.display = 'none';
-      textarea.style.display = '';
-      textarea.style.height = 'auto';
-      textarea.style.height = Math.max(textarea.scrollHeight, 60) + 'px';
-      textarea.focus();
+    function autosize(ta) {
+      ta.style.height = 'auto';
+      ta.style.height = Math.max(ta.scrollHeight, 60) + 'px';
     }
 
-    function stopEdit() {
-      current = textarea.value;
-      display.textContent = current || placeholder;
-      display.className = 'panel-field-display' + (current ? '' : ' empty');
-      display.style.display = '';
-      textarea.style.display = 'none';
-      onSave(current);
+    function save() {
+      task.notes = notesTA ? notesTA.value : task.notes;
+      task.outcomes = outcomesTA ? outcomesTA.value : task.outcomes;
+      syncTask(taskId, { notes: task.notes, outcomes: task.outcomes });
+      editing = false;
+      render();
     }
 
-    editBtn.addEventListener('click', () => {
-      textarea.style.display === 'none' ? startEdit() : stopEdit();
-    });
-    textarea.addEventListener('blur', stopEdit);
-    textarea.addEventListener('keydown', e => {
-      if (e.key === 'Escape') { textarea.value = current; stopEdit(); }
-    });
-    textarea.addEventListener('input', () => {
-      textarea.style.height = 'auto';
-      textarea.style.height = Math.max(textarea.scrollHeight, 60) + 'px';
-      syncSave(textarea.value);
-    });
+    function render() {
+      wrap.innerHTML = '';
+      const hasNotes = !!task.notes;
+      const hasOutcomes = !!task.outcomes;
 
+      if (editing) {
+        const notesLabel = document.createElement('div');
+        notesLabel.className = 'panel-section-label';
+        notesLabel.textContent = 'Commit description';
+        notesLabel.style.marginBottom = '6px';
+        wrap.appendChild(notesLabel);
+
+        notesTA = document.createElement('textarea');
+        notesTA.className = 'panel-notes-input';
+        notesTA.placeholder = 'Add commit notes...';
+        notesTA.value = task.notes || '';
+        notesTA.style.marginBottom = '12px';
+        notesTA.addEventListener('input', () => autosize(notesTA));
+        notesTA.addEventListener('keydown', e => { if (e.key === 'Escape') save(); });
+        wrap.appendChild(notesTA);
+
+        const outcomesLabel = document.createElement('div');
+        outcomesLabel.className = 'panel-section-label';
+        outcomesLabel.textContent = 'Outcomes';
+        outcomesLabel.style.marginBottom = '6px';
+        wrap.appendChild(outcomesLabel);
+
+        outcomesTA = document.createElement('textarea');
+        outcomesTA.className = 'panel-notes-input';
+        outcomesTA.placeholder = 'Add outcomes...';
+        outcomesTA.value = task.outcomes || '';
+        outcomesTA.addEventListener('input', () => autosize(outcomesTA));
+        outcomesTA.addEventListener('keydown', e => { if (e.key === 'Escape') save(); });
+        wrap.appendChild(outcomesTA);
+
+        const saveBtn = document.createElement('button');
+        saveBtn.className = 'panel-action-btn';
+        saveBtn.textContent = 'Save';
+        saveBtn.style.marginTop = '8px';
+        saveBtn.addEventListener('click', save);
+        wrap.appendChild(saveBtn);
+
+        setTimeout(() => { notesTA.focus(); autosize(notesTA); autosize(outcomesTA); }, 0);
+      } else {
+        if (hasNotes) {
+          const label = document.createElement('div');
+          label.className = 'panel-section-label';
+          label.style.marginBottom = '4px';
+          label.textContent = 'Commit description';
+          wrap.appendChild(label);
+          const text = document.createElement('div');
+          text.className = 'panel-field-display';
+          text.style.marginBottom = '12px';
+          text.textContent = task.notes;
+          wrap.appendChild(text);
+        }
+        if (hasOutcomes) {
+          const label = document.createElement('div');
+          label.className = 'panel-section-label';
+          label.style.marginBottom = '4px';
+          label.textContent = 'Outcomes';
+          wrap.appendChild(label);
+          const text = document.createElement('div');
+          text.className = 'panel-field-display';
+          text.style.marginBottom = '12px';
+          text.textContent = task.outcomes;
+          wrap.appendChild(text);
+        }
+
+        const pencilBtn = document.createElement('button');
+        pencilBtn.className = 'panel-field-edit-btn';
+        pencilBtn.title = 'Edit notes & outcomes';
+        pencilBtn.innerHTML = PENCIL + `<span style="font-size:11px;color:var(--text-muted);margin-left:5px">${hasNotes || hasOutcomes ? 'Edit' : 'Add notes & outcomes'}</span>`;
+        pencilBtn.addEventListener('click', () => { editing = true; render(); });
+        wrap.appendChild(pencilBtn);
+      }
+    }
+
+    render();
     return wrap;
   }
 
-  body.appendChild(buildField(
-    'Commit description', task.notes, 'Add commit notes...',
-    v => { task.notes = v; syncTask(taskId, { notes: v }); }
-  ));
-  body.appendChild(buildField(
-    'Outcomes', task.outcomes, 'Add outcomes...',
-    v => { task.outcomes = v; syncTask(taskId, { outcomes: v }); }
-  ));
+  body.appendChild(buildNotesSection());
 
   // Discussion section
   const discussion = document.createElement('div');

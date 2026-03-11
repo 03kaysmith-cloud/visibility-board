@@ -303,12 +303,6 @@
       overflow: visible;
     }
 
-    .col-body.drag-over {
-      background: rgba(96, 165, 250, 0.04);
-      outline: 2px dashed rgba(96, 165, 250, 0.25);
-      outline-offset: 0px;
-    }
-
     /* ---- PERSON CARD ---- */
     .card {
       background: var(--surface);
@@ -327,11 +321,6 @@
       border-color: rgba(255,255,255,0.13);
     }
 
-
-    .card.dragging {
-      opacity: 0.35;
-      cursor: grabbing;
-    }
 
     .card-person {
       display: flex;
@@ -374,15 +363,6 @@
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-    }
-
-    .person-role {
-      font-size: 11px;
-      color: var(--text-muted);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      margin-top: 1px;
     }
 
     .card-meta {
@@ -681,6 +661,29 @@
     }
 
     .dept-tag-btn:hover { opacity: 0.75; }
+
+    .panel-dept-select {
+      appearance: none;
+      border: none;
+      border-radius: 4px;
+      padding: 2px 8px;
+      font-size: 11px;
+      font-weight: 700;
+      font-family: inherit;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      cursor: pointer;
+      background: var(--surface-2);
+      color: var(--text-muted);
+      outline: none;
+    }
+
+    .panel-dept-select.dept-revops  { background: rgba(99,102,241,0.18); color: #818cf8; }
+    .panel-dept-select.dept-product { background: rgba(236,72,153,0.15); color: #f472b6; }
+    .panel-dept-select.dept-gtm     { background: rgba(20,184,166,0.15); color: #2dd4bf; }
+    .panel-dept-select.dept-csm     { background: rgba(245,158,11,0.15); color: #fbbf24; }
+
+    .panel-dept-select:hover { opacity: 0.85; }
 
     .panel-field-header {
       display: flex;
@@ -1419,7 +1422,7 @@ function renderCard(person) {
     ? `<div class="card-meta">${visibleTasks.length} tasks<span class="help-count">${flaggedCount} need help</span></div>`
     : `<div class="card-meta">${visibleTasks.length} task${visibleTasks.length !== 1 ? 's' : ''}</div>`;
   return `
-    <div class="card${isCollapsed ? ' collapsed' : ''}" draggable="true" data-person-id="${person.id}">
+    <div class="card${isCollapsed ? ' collapsed' : ''}" data-person-id="${person.id}">
       <div class="card-person">
         ${person.avatarUrl
           ? `<div class="avatar"><img src="${person.avatarUrl}" alt="${person.name}" /></div>`
@@ -1427,7 +1430,6 @@ function renderCard(person) {
         }
         <div class="person-info">
           <div class="person-name">${person.name}</div>
-          <div class="person-role">${person.role}</div>
         </div>
         ${metaHtml}
         <button class="card-collapse-btn" data-collapse-person="${person.id}" title="${isCollapsed ? 'Expand' : 'Collapse'}">
@@ -1490,13 +1492,7 @@ function renderBoard() {
     );
     return `
       <div class="col" data-col-id="${col.id}">
-        <div class="col-header">
-          <div class="col-title-wrap">
-            <div class="col-title" data-col-title="${col.id}">${col.title}</div>
-          </div>
-          <div class="col-count">${colPeople.length}</div>
-        </div>
-        <div class="col-body" data-col-drop="${col.id}">
+        <div class="col-body">
           ${colPeople.map(p => renderCard(p)).join('')}
         </div>
       </div>`;
@@ -1505,7 +1501,6 @@ function renderBoard() {
   board.innerHTML = colsHtml;
 
   updateFlagCounter();
-  bindDrag();
   bindColTitleEdit();
 }
 
@@ -1517,52 +1512,43 @@ function updateFlagCounter() {
   if (discussionsOpen) renderDiscussionsSidebar();
 }
 
-// ---- DRAG & DROP ----
+// ---- AUTO-BALANCE COLUMNS ----
+// Greedy LPT (Longest Processing Time) bin-packing:
+// sort cards by estimated height descending, assign each to the
+// currently shortest column. Re-runs whenever the data signature changes.
 
-let dragPersonId = null;
-let dragSourceColId = null;
+// Estimated card height in pixels
+function cardHeight(person) {
+  const HEADER = 88;   // avatar row + meta + padding
+  const PER_TASK = 46; // each task row
+  const GAP = 8;       // gap below card
+  return HEADER + person.tasks.length * PER_TASK + GAP;
+}
 
-function bindDrag() {
-  document.querySelectorAll('.card').forEach(card => {
-    card.addEventListener('dragstart', e => {
-      dragPersonId = card.dataset.personId;
-      dragSourceColId = card.closest('[data-col-id]').dataset.colId;
-      card.classList.add('dragging');
-      e.dataTransfer.effectAllowed = 'move';
-    });
-    card.addEventListener('dragend', () => {
-      card.classList.remove('dragging');
-      document.querySelectorAll('.col-body').forEach(b => b.classList.remove('drag-over'));
-    });
-  });
+function balanceSignature() {
+  return people.map(p => `${p.id}:${p.tasks.length}`).sort().join('|');
+}
 
-  document.querySelectorAll('.col-body').forEach(body => {
-    body.addEventListener('dragover', e => {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'move';
-      body.classList.add('drag-over');
-    });
-    body.addEventListener('dragleave', e => {
-      if (!body.contains(e.relatedTarget)) body.classList.remove('drag-over');
-    });
-    body.addEventListener('drop', e => {
-      e.preventDefault();
-      body.classList.remove('drag-over');
-      const targetColId = body.dataset.colDrop;
-      if (!dragPersonId || targetColId === dragSourceColId) return;
+let lastBalanceSig = '';
 
-      const srcCol = state.columns.find(c => c.id === dragSourceColId);
-      const dstCol = state.columns.find(c => c.id === targetColId);
-      if (!srcCol || !dstCol) return;
+function autoBalanceColumns() {
+  const numCols = state.columns.length;
+  if (numCols === 0) return;
 
-      srcCol.peopleIds = srcCol.peopleIds.filter(id => id !== dragPersonId);
-      dstCol.peopleIds.push(dragPersonId);
-      saveColumns();
-      dragPersonId = null;
-      dragSourceColId = null;
-      renderBoard();
-    });
-  });
+  // Sort people by card height, tallest first
+  const sorted = [...people].sort((a, b) => cardHeight(b) - cardHeight(a));
+
+  // Greedy assignment — always pick the shortest column
+  const heights = new Array(numCols).fill(0);
+  const buckets = Array.from({ length: numCols }, () => []);
+
+  for (const person of sorted) {
+    const minIdx = heights.indexOf(Math.min(...heights));
+    buckets[minIdx].push(person.id);
+    heights[minIdx] += cardHeight(person);
+  }
+
+  state.columns.forEach((col, i) => { col.peopleIds = buckets[i] || []; });
 }
 
 // ---- TASK PANEL ----
@@ -1690,7 +1676,7 @@ function openPanel(taskId) {
   // Header
   const deptCycle = Object.keys(DEPT);
   document.getElementById('panelTaskName').innerHTML = '';
-  document.getElementById('panelPersonLine').innerHTML = `<strong>${person.name}</strong> &mdash; ${person.role}`;
+  document.getElementById('panelPersonLine').innerHTML = `<strong>${person.name}</strong>`;
 
   // Rebuild header tags area
   let headerTagsEl = document.getElementById('panelHeaderTags');
@@ -1700,9 +1686,18 @@ function openPanel(taskId) {
     headerTagsEl.className = 'panel-header-tags';
     document.getElementById('panelDeptTag').replaceWith(headerTagsEl);
   }
-  headerTagsEl.innerHTML = d.label
-    ? `<span class="dept-tag ${d.cls} dept-tag-btn" id="panelDeptToggle" title="Click to change dept">${d.label}</span>`
-    : `<span class="dept-tag-btn" id="panelDeptToggle" title="Click to set dept" style="color:var(--text-muted);font-size:11px;cursor:pointer">+ dept</span>`;
+  const deptSelect = document.createElement('select');
+  deptSelect.id = 'panelDeptToggle';
+  deptSelect.className = 'panel-dept-select' + (d.cls ? ` ${d.cls}` : '');
+  [['', 'No department'], ...Object.entries(DEPT).map(([k, v]) => [k, v.label])].forEach(([val, label]) => {
+    const opt = document.createElement('option');
+    opt.value = val;
+    opt.textContent = label;
+    if (val === (task.dept || '')) opt.selected = true;
+    deptSelect.appendChild(opt);
+  });
+  headerTagsEl.innerHTML = '';
+  headerTagsEl.appendChild(deptSelect);
 
   const barStatus = task.flagged ? 'flagged' : weeklyStatus;
   document.getElementById('panelStatusBar').className = `panel-status-bar ${barStatus}`;
@@ -1751,11 +1746,11 @@ function openPanel(taskId) {
     syncName(nameInput.value);
   });
 
-  // Dept cycle on click
-  document.getElementById('panelDeptToggle').addEventListener('click', () => {
-    const idx = deptCycle.indexOf(task.dept);
-    task.dept = deptCycle[(idx + 1) % deptCycle.length];
-    openPanel(taskId);
+  // Dept dropdown change
+  document.getElementById('panelDeptToggle').addEventListener('change', e => {
+    task.dept = e.target.value;
+    const newD = DEPT[task.dept] || { cls: '' };
+    e.target.className = 'panel-dept-select' + (newD.cls ? ` ${newD.cls}` : '');
     renderBoard();
     syncTask(taskId, { dept: task.dept });
   });
@@ -2029,26 +2024,22 @@ async function applyData(data, isInitialLoad = false) {
   people.length = 0;
   people.push(...data.people);
 
-  const savedCols = localStorage.getItem('vb_columns');
-  if (savedCols) {
-    const parsed = JSON.parse(savedCols);
-    const validIds = new Set(people.map(p => p.id));
-    parsed.forEach(col => { col.peopleIds = col.peopleIds.filter(id => validIds.has(id)); });
-    const assignedIds = new Set(parsed.flatMap(c => c.peopleIds));
-    const unassigned = people.filter(p => !assignedIds.has(p.id)).map(p => p.id);
-    if (unassigned.length && parsed.length > 0) parsed[0].peopleIds.push(...unassigned);
-    state.columns = parsed;
-  } else {
-    const ids = people.map(p => p.id);
-    const cols = [
+  // Ensure 5 columns exist (preserve titles if already set)
+  if (state.columns.length === 0) {
+    state.columns = [
       { id: 'col1', title: '', peopleIds: [] },
       { id: 'col2', title: '', peopleIds: [] },
       { id: 'col3', title: '', peopleIds: [] },
       { id: 'col4', title: '', peopleIds: [] },
       { id: 'col5', title: '', peopleIds: [] },
     ];
-    ids.forEach((id, i) => cols[i % 5].peopleIds.push(id));
-    state.columns = cols;
+  }
+
+  // Re-balance whenever people or task counts change
+  const sig = balanceSignature();
+  if (sig !== lastBalanceSig) {
+    lastBalanceSig = sig;
+    autoBalanceColumns();
   }
 
   Object.keys(comments).forEach(k => delete comments[k]);
@@ -2169,7 +2160,7 @@ function renderDiscussionsSidebar() {
         <div class="disc-item-header">
           <div>
             <div class="disc-item-task">${task.name}</div>
-            <div class="disc-item-person">${person.name} &middot; ${person.role}</div>
+            <div class="disc-item-person">${person.name}</div>
           </div>
           <div class="disc-item-count">${list.length} comment${list.length !== 1 ? 's' : ''}</div>
         </div>
